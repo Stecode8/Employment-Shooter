@@ -1,0 +1,856 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>2D Shooter Game</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            background: #000;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            font-family: Arial, sans-serif;
+        }
+        canvas {
+            border: 2px solid #333;
+            background: #111;
+            cursor: crosshair;
+        }
+        #score {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            color: white;
+            font-size: 24px;
+        }
+        #instructions {
+            position: absolute;
+            bottom: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            color: white;
+            text-align: center;
+        }
+    </style>
+</head>
+<body>
+    <div id="score">Score: 0</div>
+    <div id="ability" style="position: absolute; top: 50px; left: 20px; color: white; font-size: 18px;">Special Ability: 0</div>
+    <div id="health" style="position: absolute; top: 80px; left: 20px; color: white; font-size: 18px;">Health: 2/2</div>
+    <canvas id="gameCanvas" width="1000" height="750"></canvas>
+    <div id="instructions">
+        Use WASD to move, HOLD LEFT CLICK to auto-shoot, PRESS E for special ability (500px radius, 4 damage)
+    </div>
+
+    <script>
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+
+        // Game state
+        const game = {
+            score: 0,
+            running: false,
+            lastBlueSpawn: 0,
+            specialAbilityCharges: 0,
+            abilityEffect: null,
+            bossSpawned: false,
+            lastAbilityScore: 0,
+            gameOver: false,
+            started: false,
+            victory: false,
+            victoryTime: 0,
+            showVictoryScreen: false
+        };
+
+        // Mouse tracking
+        const mouse = {
+            x: 0,
+            y: 0,
+            isPressed: false
+        };
+
+        // Player object
+        const player = {
+            x: canvas.width / 2,
+            y: canvas.height / 2,
+            width: 35,
+            height: 35,
+            speed: 5,
+            color: '#00ff00',
+            health: 2,
+            maxHealth: 2,
+            invulnerable: false,
+            invulnerabilityTime: 0
+        };
+
+        // Load player image
+        const playerImage = new Image();
+        playerImage.src = 'mango.jpg';
+        let playerImageLoaded = false;
+        playerImage.onload = function() {
+            playerImageLoaded = true;
+        };
+
+        // Arrays for game objects
+        const bullets = [];
+        const enemies = [];
+
+        // Load enemy images
+        const redEnemyImage = new Image();
+        redEnemyImage.src = 'Red enemies.jpg';
+        let redImageLoaded = false;
+        redEnemyImage.onload = function() {
+            redImageLoaded = true;
+        };
+
+        const blueEnemyImage = new Image();
+        blueEnemyImage.src = 'Blue enemy.jpg';
+        let blueImageLoaded = false;
+        blueEnemyImage.onload = function() {
+            blueImageLoaded = true;
+        };
+
+        const bossImage = new Image();
+        bossImage.src = 'Philippe.jpg';
+        let bossImageLoaded = false;
+        bossImage.onload = function() {
+            bossImageLoaded = true;
+        };
+
+        const pierreImage = new Image();
+        pierreImage.src = 'Pierre.jpg';
+        let pierreImageLoaded = false;
+        pierreImage.onload = function() {
+            pierreImageLoaded = true;
+        };
+
+        // Load audio files
+        const popSound = new Audio('Pop.mp3');
+        const fartSound = new Audio('Fart.mp3');
+        
+        // Set audio properties
+        popSound.volume = 0.5;
+        fartSound.volume = 0.5;
+        popSound.preload = 'auto';
+        fartSound.preload = 'auto';
+        
+        let audioInitialized = false;
+        
+        // Function to initialize audio (called on first user interaction)
+        function initializeAudio() {
+            if (!audioInitialized) {
+                popSound.load();
+                fartSound.load();
+                audioInitialized = true;
+                console.log('Audio initialized');
+            }
+        }
+        
+        // Function to play sound safely
+        function playSound(audio) {
+            try {
+                if (!audioInitialized) {
+                    initializeAudio();
+                }
+                audio.currentTime = 0; // Reset to beginning
+                const playPromise = audio.play();
+                if (playPromise !== undefined) {
+                    playPromise.catch(e => console.log('Audio play failed:', e));
+                }
+            } catch (e) {
+                console.log('Audio error:', e);
+            }
+        }
+
+        // Input handling
+        const keys = {};
+        
+        document.addEventListener('keydown', (e) => {
+            keys[e.key.toLowerCase()] = true;
+        });
+        
+        document.addEventListener('keyup', (e) => {
+            keys[e.key.toLowerCase()] = false;
+        });
+
+        // Start game function
+        function startGame() {
+            // Reset game state
+            game.score = 0;
+            game.running = true;
+            game.gameOver = false;
+            game.victory = false;
+            game.victoryTime = 0;
+            game.showVictoryScreen = false;
+            game.started = true;
+            game.lastBlueSpawn = 0;
+            game.specialAbilityCharges = 0;
+            game.abilityEffect = null;
+            game.bossSpawned = false;
+            game.lastAbilityScore = 0;
+            
+            // Reset player
+            player.x = canvas.width / 2;
+            player.y = canvas.height / 2;
+            player.health = 2;
+            player.invulnerable = false;
+            player.invulnerabilityTime = 0;
+            
+            // Clear arrays
+            bullets.length = 0;
+            enemies.length = 0;
+            
+            // Update displays
+            document.getElementById('score').textContent = 'Score: 0';
+            document.getElementById('ability').textContent = 'Special Ability: 0';
+            document.getElementById('health').textContent = 'Health: 2/2';
+        }
+
+        // Restart game function
+        function restartGame() {
+            startGame();
+        }
+
+        // Mouse event listeners
+        canvas.addEventListener('mousemove', (e) => {
+            const rect = canvas.getBoundingClientRect();
+            mouse.x = e.clientX - rect.left;
+            mouse.y = e.clientY - rect.top;
+        });
+
+        canvas.addEventListener('mousedown', (e) => {
+            if (e.button === 0) { // Left mouse button
+                mouse.isPressed = true;
+            }
+        });
+
+        canvas.addEventListener('mouseup', (e) => {
+            if (e.button === 0) { // Left mouse button
+                mouse.isPressed = false;
+            }
+        });
+
+        canvas.addEventListener('mouseleave', () => {
+            mouse.isPressed = false; // Stop shooting when mouse leaves canvas
+        });
+
+        canvas.addEventListener('click', (e) => {
+            initializeAudio(); // Initialize audio on first user interaction
+            
+            if (game.gameOver) {
+                restartGame();
+            } else if (game.victory && game.showVictoryScreen) {
+                // Only allow restart if victory screen has been shown for 3 seconds
+                if (Date.now() - game.victoryTime >= 6000) { // 3 seconds to show + 3 seconds to be clickable
+                    restartGame();
+                }
+            } else if (!game.started) {
+                startGame();
+            }
+        });
+
+        // Shooting function
+        function shootBullet() {
+            const playerCenterX = player.x + player.width / 2;
+            const playerCenterY = player.y + player.height / 2;
+            
+            // Calculate direction from player to mouse
+            const dx = mouse.x - playerCenterX;
+            const dy = mouse.y - playerCenterY;
+            const distance = Math.sqrt(dx * dx + dy * dy);
+            
+            if (distance > 0) {
+                const bulletSpeed = 8;
+                bullets.push({
+                    x: playerCenterX,
+                    y: playerCenterY,
+                    width: 4,
+                    height: 4,
+                    speedX: (dx / distance) * bulletSpeed,
+                    speedY: (dy / distance) * bulletSpeed,
+                    color: '#ffff00'
+                });
+            }
+        }
+
+        // Special ability function
+        function useSpecialAbility() {
+            if (game.specialAbilityCharges > 0) {
+                const playerCenterX = player.x + player.width / 2;
+                const playerCenterY = player.y + player.height / 2;
+                const radius = 500;
+                
+                // Damage all enemies within radius
+                for (let i = enemies.length - 1; i >= 0; i--) {
+                    const enemy = enemies[i];
+                    const enemyCenterX = enemy.x + enemy.width / 2;
+                    const enemyCenterY = enemy.y + enemy.height / 2;
+                    
+                    const distance = Math.sqrt(
+                        Math.pow(enemyCenterX - playerCenterX, 2) + 
+                        Math.pow(enemyCenterY - playerCenterY, 2)
+                    );
+                    
+                    if (distance <= radius) {
+                        enemy.health -= 4;
+                        
+                        // Make boss grow when hit by special ability
+                        if (enemy.type === 'boss') {
+                            enemy.width += 8; // Grow by 8 since it takes 4 damage (2 pixels per damage)
+                            enemy.height += 8;
+                        }
+                        
+                        // Remove enemy if health reaches 0
+                        if (enemy.health <= 0) {
+                            enemies.splice(i, 1);
+                            
+                            // Award reduced points for special ability kills
+                            if (enemy.type === 'blue') {
+                                game.score += 4; // Half points: 8 -> 4
+                                playSound(popSound); // Play pop sound
+                            } else if (enemy.type === 'boss') {
+                                game.score += 50; // Half points: 100 -> 50
+                                game.victory = true; // Victory when boss is killed
+                                game.running = false;
+                                game.victoryTime = Date.now(); // Record victory time
+                                playSound(fartSound); // Play fart sound for boss death
+                            } else {
+                                game.score += 0.5; // Half points: 1 -> 0.5
+                                playSound(popSound); // Play pop sound
+                            }
+                            document.getElementById('score').textContent = `Score: ${game.score}`;
+                            
+                            // Check for special ability charge every 15 points (max 2)
+                            const scoreThreshold = Math.floor(game.score / 15) * 15;
+                            if (scoreThreshold > game.lastAbilityScore && game.specialAbilityCharges < 2) {
+                                game.specialAbilityCharges += 1;
+                                game.lastAbilityScore = scoreThreshold;
+                            }
+                            document.getElementById('ability').textContent = `Special Ability: ${game.specialAbilityCharges}`;
+                        }
+                    }
+                }
+                
+                // Use charge and create visual effect
+                game.specialAbilityCharges -= 1;
+                document.getElementById('ability').textContent = `Special Ability: ${game.specialAbilityCharges}`;
+                game.abilityEffect = {
+                    x: playerCenterX,
+                    y: playerCenterY,
+                    radius: 0,
+                    maxRadius: radius,
+                    duration: 90 // frames - slower expansion
+                };
+            }
+        }
+
+        // Player movement and shooting
+        function updatePlayer() {
+            // Update invulnerability
+            if (player.invulnerable) {
+                player.invulnerabilityTime--;
+                if (player.invulnerabilityTime <= 0) {
+                    player.invulnerable = false;
+                }
+            }
+            
+            // Movement
+            if (keys['a'] && player.x > 0) player.x -= player.speed;
+            if (keys['d'] && player.x < canvas.width - player.width) player.x += player.speed;
+            if (keys['w'] && player.y > 0) player.y -= player.speed;
+            if (keys['s'] && player.y < canvas.height - player.height) player.y += player.speed;
+            
+            // Special ability
+            if (keys['e']) {
+                if (!player.lastAbility || Date.now() - player.lastAbility > 500) { // Prevent spam
+                    useSpecialAbility();
+                    player.lastAbility = Date.now();
+                }
+            }
+            
+            // Automatic shooting when mouse is held down
+            if (mouse.isPressed) {
+                if (!player.lastShot || Date.now() - player.lastShot > 100) { // 10 shots per second
+                    shootBullet();
+                    player.lastShot = Date.now();
+                }
+            }
+        }
+
+        // Bullet system
+        function updateBullets() {
+            for (let i = bullets.length - 1; i >= 0; i--) {
+                const bullet = bullets[i];
+                bullet.x += bullet.speedX;
+                bullet.y += bullet.speedY;
+                
+                // Remove bullets that go off screen
+                if (bullet.x < 0 || bullet.x > canvas.width || 
+                    bullet.y < 0 || bullet.y > canvas.height) {
+                    bullets.splice(i, 1);
+                }
+            }
+        }
+
+        // Enemy spawning
+        function spawnEnemies() {
+            // Spawn boss at 200 points
+            if (game.score >= 200 && !game.bossSpawned) {
+                const boss = {
+                    x: Math.random() * (canvas.width - 50),
+                    y: -50,
+                    width: 50,
+                    height: 50,
+                    speed: 0.5,
+                    color: '#800080', // Purple boss
+                    health: 100,
+                    maxHealth: 100,
+                    type: 'boss'
+                };
+                enemies.push(boss);
+                game.bossSpawned = true;
+                return; // Stop spawning other enemies
+            }
+            
+            // Stop regular spawning at 200 points
+            if (game.score >= 200) {
+                return;
+            }
+            
+            // Spawn blue enemy every 10 points
+            if (game.score > 0 && game.score % 10 === 0 && game.score > game.lastBlueSpawn) {
+                const blueEnemy = {
+                    x: Math.random() * (canvas.width - 65),
+                    y: -65,
+                    width: 65,
+                    height: 65,
+                    speed: 0.3 + Math.random() * 0.5, // Slower than red enemies
+                    color: '#0000ff',
+                    health: 8,
+                    maxHealth: 8,
+                    type: 'blue'
+                };
+                enemies.push(blueEnemy);
+                game.lastBlueSpawn = game.score;
+            }
+            
+            // Regular red enemy spawning
+            if (enemies.length < 15 && Math.random() < 0.02) { // Limit to 15 enemies, 2% chance each frame
+                const enemy = {
+                    x: Math.random() * (canvas.width - 40),
+                    y: -40,
+                    width: 40,
+                    height: 40,
+                    speed: 0.35 + Math.random() * 0.7, // 30% slower: 0.35-1.05 instead of 0.5-1.5
+                    color: '#ff0000',
+                    health: 1,
+                    maxHealth: 1,
+                    type: 'red'
+                };
+                enemies.push(enemy);
+            }
+        }
+
+        // Enemy AI and movement
+        function updateEnemies() {
+            // Calculate speed multiplier based on score (1% increase per point)
+            const speedMultiplier = 1 + (game.score / 100);
+            
+            for (let i = enemies.length - 1; i >= 0; i--) {
+                const enemy = enemies[i];
+                
+                // Move toward player
+                const dx = player.x - enemy.x;
+                const dy = player.y - enemy.y;
+                const distance = Math.sqrt(dx * dx + dy * dy);
+                
+                if (distance > 0) {
+                    const adjustedSpeed = enemy.speed * speedMultiplier;
+                    enemy.x += (dx / distance) * adjustedSpeed;
+                    enemy.y += (dy / distance) * adjustedSpeed;
+                }
+                
+                // Remove enemies that reach bottom of screen
+                if (enemy.y > canvas.height) {
+                    enemies.splice(i, 1);
+                }
+            }
+        }
+
+        // Collision detection
+        function checkCollisions() {
+            // Bullet-enemy collisions
+            for (let i = bullets.length - 1; i >= 0; i--) {
+                const bullet = bullets[i];
+                for (let j = enemies.length - 1; j >= 0; j--) {
+                    const enemy = enemies[j];
+                    
+                    if (bullet.x < enemy.x + enemy.width &&
+                        bullet.x + bullet.width > enemy.x &&
+                        bullet.y < enemy.y + enemy.height &&
+                        bullet.y + bullet.height > enemy.y) {
+                        
+                        // Remove bullet
+                        bullets.splice(i, 1);
+                        
+                        // Damage enemy
+                        enemy.health -= 1;
+                        
+                        // Make boss grow when hit
+                        if (enemy.type === 'boss') {
+                            enemy.width += 2;
+                            enemy.height += 2;
+                        }
+                        
+                        // Remove enemy if health reaches 0
+                        if (enemy.health <= 0) {
+                            enemies.splice(j, 1);
+                            
+                            // Award points based on enemy type
+                            if (enemy.type === 'blue') {
+                                game.score += 8; // Blue enemies worth 8 points
+                                playSound(popSound); // Play pop sound
+                            } else if (enemy.type === 'boss') {
+                                game.score += 100; // Boss worth 100 points
+                                game.victory = true; // Victory when boss is killed
+                                game.running = false;
+                                game.victoryTime = Date.now(); // Record victory time
+                                playSound(fartSound); // Play fart sound for boss death
+                            } else {
+                                game.score += 1; // Red enemies worth 1 point
+                                playSound(popSound); // Play pop sound
+                            }
+                            document.getElementById('score').textContent = `Score: ${game.score}`;
+                            
+                            // Check for special ability charge every 15 points (max 2)
+                            const scoreThreshold = Math.floor(game.score / 15) * 15;
+                            if (scoreThreshold > game.lastAbilityScore && game.specialAbilityCharges < 2) {
+                                game.specialAbilityCharges += 1;
+                                game.lastAbilityScore = scoreThreshold;
+                            }
+                            document.getElementById('ability').textContent = `Special Ability: ${game.specialAbilityCharges}`;
+                        }
+                        break;
+                    }
+                }
+            }
+            
+            // Player-enemy collisions
+            if (!player.invulnerable) {
+                for (let i = enemies.length - 1; i >= 0; i--) {
+                    const enemy = enemies[i];
+                    
+                    if (player.x < enemy.x + enemy.width &&
+                        player.x + player.width > enemy.x &&
+                        player.y < enemy.y + enemy.height &&
+                        player.y + player.height > enemy.y) {
+                        
+                        // Damage player
+                        player.health -= 1;
+                        player.invulnerable = true;
+                        player.invulnerabilityTime = 120; // 2 seconds at 60fps
+                        document.getElementById('health').textContent = `Health: ${player.health}/${player.maxHealth}`;
+                        
+                        // Check if player is dead
+                        if (player.health <= 0) {
+                            game.running = false;
+                            game.gameOver = true;
+                        }
+                        
+                        break; // Only take damage from one enemy per frame
+                    }
+                }
+            }
+        }
+
+        // Update ability effect
+        function updateAbilityEffect() {
+            if (game.abilityEffect) {
+                game.abilityEffect.duration--;
+                game.abilityEffect.radius = game.abilityEffect.maxRadius * (1 - game.abilityEffect.duration / 90);
+                
+                if (game.abilityEffect.duration <= 0) {
+                    game.abilityEffect = null;
+                }
+            }
+        }
+
+        // Rendering
+        function render() {
+            // Clear canvas
+            ctx.fillStyle = '#111';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            
+            // Draw start screen
+            if (!game.started) {
+                // Dark background
+                ctx.fillStyle = '#000';
+                ctx.fillRect(0, 0, canvas.width, canvas.height);
+                
+                // Title
+                ctx.fillStyle = '#ffffff';
+                ctx.font = 'bold 64px Arial';
+                ctx.textAlign = 'center';
+                ctx.fillText('NO EMPLOYMENT', canvas.width / 2, canvas.height / 2 - 80);
+                
+                // Subtitle
+                ctx.fillStyle = '#aaaaaa';
+                ctx.font = '24px Arial';
+                ctx.fillText('A Survival Shooter Game', canvas.width / 2, canvas.height / 2 - 30);
+                
+                // Instructions
+                ctx.fillStyle = '#ffff00';
+                ctx.font = '18px Arial';
+                ctx.fillText('Click to start your fight against employment!', canvas.width / 2, canvas.height / 2 + 20);
+                
+                // Controls
+                ctx.fillStyle = '#cccccc';
+                ctx.font = '14px Arial';
+                ctx.fillText('WASD to move • Hold left click to shoot • E for special ability', canvas.width / 2, canvas.height / 2 + 60);
+                
+                return; // Don't draw game elements
+            }
+            
+            // Check if victory screen should be shown (3 seconds after boss death)
+            if (game.victory && !game.showVictoryScreen) {
+                if (Date.now() - game.victoryTime >= 3000) { // 3 seconds delay
+                    game.showVictoryScreen = true;
+                }
+            }
+            
+            // Draw victory screen
+            if (game.victory && game.showVictoryScreen) {
+                // Semi-transparent overlay
+                ctx.fillStyle = 'rgba(0, 0, 0, 0.8)';
+                ctx.fillRect(0, 0, canvas.width, canvas.height);
+                
+                // Draw Pierre image if loaded
+                if (pierreImageLoaded) {
+                    const imageSize = 150;
+                    const imageX = canvas.width / 2 - imageSize / 2;
+                    const imageY = canvas.height / 2 - 280; // Moved higher to avoid text interference
+                    ctx.drawImage(pierreImage, imageX, imageY, imageSize, imageSize);
+                }
+                
+                // Victory text "GOOD" part
+                ctx.fillStyle = '#00ff00';
+                ctx.font = 'bold 48px Arial';
+                ctx.textAlign = 'center';
+                ctx.fillText('GOOD', canvas.width / 2 - 80, canvas.height / 2 - 60);
+                
+                // Victory text "JOB" part with strikethrough
+                ctx.fillStyle = '#00ff00';
+                ctx.fillText('JOB!', canvas.width / 2 + 80, canvas.height / 2 - 60);
+                
+                // Draw strikethrough line over "JOB"
+                ctx.strokeStyle = '#ff0000';
+                ctx.lineWidth = 4;
+                ctx.beginPath();
+                ctx.moveTo(canvas.width / 2 + 30, canvas.height / 2 - 70);
+                ctx.lineTo(canvas.width / 2 + 130, canvas.height / 2 - 50);
+                ctx.stroke();
+                
+                // Final Score
+                ctx.fillStyle = '#ffffff';
+                ctx.font = '24px Arial';
+                ctx.fillText(`Final Score: ${game.score}`, canvas.width / 2, canvas.height / 2 - 10);
+                
+                // Restart instruction - only show after 3 more seconds
+                if (Date.now() - game.victoryTime >= 6000) { // 6 seconds total (3 to show + 3 to be clickable)
+                    ctx.fillStyle = '#ffff00';
+                    ctx.font = '18px Arial';
+                    ctx.fillText('You avoided employment! Click anywhere to restart', canvas.width / 2, canvas.height / 2 + 30);
+                }
+                
+                return; // Don't draw game elements
+            }
+            
+            // Draw game over screen
+            if (game.gameOver) {
+                // Semi-transparent overlay
+                ctx.fillStyle = 'rgba(0, 0, 0, 0.8)';
+                ctx.fillRect(0, 0, canvas.width, canvas.height);
+                
+                // Game Over text
+                ctx.fillStyle = '#ff0000';
+                ctx.font = 'bold 48px Arial';
+                ctx.textAlign = 'center';
+                ctx.fillText('YOU GOT EMPLOYED!', canvas.width / 2, canvas.height / 2 - 60);
+                
+                // Final Score
+                ctx.fillStyle = '#ffffff';
+                ctx.font = '24px Arial';
+                ctx.fillText(`Final Score: ${game.score}`, canvas.width / 2, canvas.height / 2 - 10);
+                
+                // Restart instruction
+                ctx.fillStyle = '#ffff00';
+                ctx.font = '18px Arial';
+                ctx.fillText('Click anywhere to restart', canvas.width / 2, canvas.height / 2 + 30);
+                
+                return; // Don't draw game elements
+            }
+            
+            // Draw ability effect
+            if (game.abilityEffect) {
+                ctx.strokeStyle = '#ffff00';
+                ctx.lineWidth = 3;
+                ctx.globalAlpha = 0.6;
+                ctx.beginPath();
+                ctx.arc(game.abilityEffect.x, game.abilityEffect.y, game.abilityEffect.radius, 0, 2 * Math.PI);
+                ctx.stroke();
+                ctx.globalAlpha = 1.0;
+            }
+            
+            // Draw crosshair at mouse position
+            ctx.strokeStyle = '#666';
+            ctx.lineWidth = 1;
+            ctx.beginPath();
+            ctx.moveTo(mouse.x - 10, mouse.y);
+            ctx.lineTo(mouse.x + 10, mouse.y);
+            ctx.moveTo(mouse.x, mouse.y - 10);
+            ctx.lineTo(mouse.x, mouse.y + 10);
+            ctx.stroke();
+            
+            // Draw player (flashing when invulnerable)
+            if (!player.invulnerable || Math.floor(player.invulnerabilityTime / 10) % 2 === 0) {
+                if (playerImageLoaded) {
+                    ctx.drawImage(playerImage, player.x, player.y, player.width, player.height);
+                } else {
+                    ctx.fillStyle = player.color;
+                    ctx.fillRect(player.x, player.y, player.width, player.height);
+                }
+            }
+            
+            // Draw ability bar above player
+            const abilityBarWidth = 40;
+            const abilityBarHeight = 6;
+            const abilityBarX = player.x + (player.width - abilityBarWidth) / 2;
+            const abilityBarY = player.y - 15;
+            
+            // Background bar
+            ctx.fillStyle = '#333';
+            ctx.fillRect(abilityBarX, abilityBarY, abilityBarWidth, abilityBarHeight);
+            
+            // Ability charges (up to 2)
+            const chargeWidth = abilityBarWidth / 2;
+            for (let i = 0; i < 2; i++) {
+                if (i < game.specialAbilityCharges) {
+                    ctx.fillStyle = '#ffff00'; // Yellow for available charges
+                } else {
+                    ctx.fillStyle = '#666'; // Dark for empty charges
+                }
+                ctx.fillRect(abilityBarX + i * chargeWidth, abilityBarY, chargeWidth - 1, abilityBarHeight);
+            }
+            
+            // Draw health bar above ability bar
+            const healthBarWidth = 40;
+            const healthBarHeight = 6;
+            const healthBarX = player.x + (player.width - healthBarWidth) / 2;
+            const healthBarY = player.y - 25;
+            
+            // Background bar
+            ctx.fillStyle = '#333';
+            ctx.fillRect(healthBarX, healthBarY, healthBarWidth, healthBarHeight);
+            
+            // Health segments (up to 2)
+            const healthWidth = healthBarWidth / 2;
+            for (let i = 0; i < 2; i++) {
+                if (i < player.health) {
+                    ctx.fillStyle = '#ff0000'; // Red for health
+                } else {
+                    ctx.fillStyle = '#666'; // Dark for lost health
+                }
+                ctx.fillRect(healthBarX + i * healthWidth, healthBarY, healthWidth - 1, healthBarHeight);
+            }
+            
+            // Draw bullets
+            bullets.forEach(bullet => {
+                ctx.fillStyle = bullet.color;
+                ctx.fillRect(bullet.x, bullet.y, bullet.width, bullet.height);
+            });
+            
+            // Draw enemies
+            enemies.forEach(enemy => {
+                if (enemy.type === 'red' && redImageLoaded) {
+                    // Draw red enemies using the job seeker image
+                    ctx.drawImage(redEnemyImage, enemy.x, enemy.y, enemy.width, enemy.height);
+                } else if (enemy.type === 'blue' && blueImageLoaded) {
+                    // Draw blue enemies using the businessman image
+                    ctx.drawImage(blueEnemyImage, enemy.x, enemy.y, enemy.width, enemy.height);
+                } else if (enemy.type === 'boss' && bossImageLoaded) {
+                    // Draw boss using Philippe image
+                    ctx.drawImage(bossImage, enemy.x, enemy.y, enemy.width, enemy.height);
+                } else {
+                    // Fallback rectangles for any images that haven't loaded
+                    if (enemy.type === 'blue') {
+                        ctx.fillStyle = '#0000ff'; // Solid blue as fallback
+                    } else if (enemy.type === 'boss') {
+                        ctx.fillStyle = '#800080'; // Purple as fallback
+                    } else {
+                        ctx.fillStyle = enemy.color;
+                    }
+                    ctx.fillRect(enemy.x, enemy.y, enemy.width, enemy.height);
+                }
+                
+                // Draw health bar for blue enemies and boss
+                if (enemy.type === 'blue' || enemy.type === 'boss') {
+                    const barWidth = enemy.width;
+                    const barHeight = enemy.type === 'boss' ? 6 : 4;
+                    const healthRatio = enemy.health / enemy.maxHealth;
+                    
+                    // Background (red)
+                    ctx.fillStyle = '#ff0000';
+                    ctx.fillRect(enemy.x, enemy.y - 10, barWidth, barHeight);
+                    
+                    // Health (green)
+                    ctx.fillStyle = '#00ff00';
+                    ctx.fillRect(enemy.x, enemy.y - 10, barWidth * healthRatio, barHeight);
+                    
+                    // Show health numbers for boss
+                    if (enemy.type === 'boss') {
+                        ctx.fillStyle = '#ffffff';
+                        ctx.font = '12px Arial';
+                        ctx.textAlign = 'center';
+                        ctx.fillText(`${enemy.health}/${enemy.maxHealth}`, enemy.x + enemy.width/2, enemy.y - 15);
+                    }
+                }
+            });
+        }
+
+        // Game loop
+        function gameLoop() {
+            if (!game.started || game.gameOver) {
+                render(); // Only render the start/game over screen
+                requestAnimationFrame(gameLoop);
+                return;
+            }
+            
+            if (game.victory) {
+                // Keep updating to handle victory screen timing
+                render();
+                requestAnimationFrame(gameLoop);
+                return;
+            }
+            
+            if (!game.running) return;
+            
+            updatePlayer();
+            updateBullets();
+            spawnEnemies();
+            updateEnemies();
+            updateAbilityEffect();
+            checkCollisions();
+            render();
+            
+            requestAnimationFrame(gameLoop);
+        }
+
+        // Start the game
+        gameLoop();
+    </script>
+</body>
+</html>
